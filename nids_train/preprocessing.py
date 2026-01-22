@@ -19,7 +19,7 @@ class NIDSPreprocessor:
         
     def fit_scaler(self, data_path):
         """Fit scaler on training data and save parameters."""
-        print(f"⏳ Fitting scaler on training data: {data_path}...")
+        print(f"Fitting scaler on training data: {data_path}...")
         df = pd.read_csv(data_path)
         df.columns = df.columns.str.strip()
         
@@ -52,7 +52,7 @@ class NIDSPreprocessor:
         with open(self.scaler_path, "w") as f:
             json.dump(scaler_params, f, indent=2)
             
-        print(f"✅ Scaler fitted and saved to {self.scaler_path}")
+        print(f"Scaler fitted and saved to {self.scaler_path}")
         return self.scaler
     
     def load_scaler(self):
@@ -67,7 +67,7 @@ class NIDSPreprocessor:
             self.scaler.n_features_in_ = params["n_features"]
             self.feature_columns = params.get("feature_columns")
             
-            print(f"✅ Scaler loaded from {self.scaler_path}")
+            print(f"Scaler loaded from {self.scaler_path}")
             return self.scaler
         except FileNotFoundError:
             raise FileNotFoundError(f"Scaler file not found: {self.scaler_path}. Run export_scaler.py first.")
@@ -86,7 +86,18 @@ class NIDSPreprocessor:
             "Destination Port", "Protocol", "Timestamp", "Label"
         ]
         df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore")
+        
+        # Store original length before cleaning
+        original_length = len(df)
+        
+        # Clean data (remove infinite values and NaN)
         df = df.replace([np.inf, -np.inf], np.nan).dropna()
+        
+        # Filter labels to match cleaned data
+        if len(df) < original_length:
+            # Get the indices of rows that were kept
+            kept_indices = df.index
+            labels = labels.iloc[kept_indices]
         
         # Ensure consistent feature order
         if self.feature_columns is not None:
