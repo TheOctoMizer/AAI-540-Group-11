@@ -66,11 +66,11 @@ class NIDSTrainer:
         self.model = None
         self.input_dim = None
         
-        print(f"🖥️  Using device: {self.device}")
+        print(f"Using device: {self.device}")
     
     def load_and_prepare_data(self):
         """Load and preprocess training data."""
-        print(f"📂 Loading training data: {self.config.dataset_path}")
+        print(f"Loading training data: {self.config.dataset_path}")
         
         X, labels = self.preprocessor.preprocess_data(self.config.dataset_path, fit_scaler=True)
         
@@ -78,8 +78,9 @@ class NIDSTrainer:
         benign_mask = labels == "BENIGN"
         X_benign = X[benign_mask]
         
-        print(f"📊 Original shape: {X.shape}")
-        print(f"✅ Benign shape: {X_benign.shape}")
+        print(f"Dataset shape: {X.shape}")
+        print(f"Benign samples: {X_benign.shape[0]} ({X_benign.shape[0]/X.shape[0]*100:.1f}%)")
+        print(f"Features: {X.shape[1]}")
         
         # Split data
         X_train, X_val = train_test_split(
@@ -90,6 +91,9 @@ class NIDSTrainer:
         
         self.input_dim = X.shape[1]
         
+        print(f"Training samples: {X_train.shape[0]}")
+        print(f"Validation samples: {X_val.shape[0]}")
+        
         return torch.FloatTensor(X_train), torch.FloatTensor(X_val)
     
     def create_model(self):
@@ -99,7 +103,9 @@ class NIDSTrainer:
     
     def train_model(self, X_train, X_val):
         """Train the autoencoder model."""
-        print(f"\n🔥 Starting training for {self.config.epochs} epochs...")
+        print(f"\nTraining: {self.config.epochs} epochs, batch_size={self.config.batch_size}, lr={self.config.learning_rate}")
+        print(f"Model parameters: {sum(p.numel() for p in Autoencoder(self.input_dim).parameters())}")
+        print(f"Device: {self.device}")
         
         # Data loaders
         train_loader = DataLoader(
@@ -120,6 +126,10 @@ class NIDSTrainer:
         # Training history
         train_history = []
         val_errors = []
+        best_val_loss = float('inf')
+        
+        print(f"{'Epoch':>5} | {'Train Loss':>11} | {'Val Loss':>9} | {'Time':>5} | {'LR':>8} | {'Improvement'}")
+        print(f"{'-'*5}-+-{'-'*11}-+-{'-'*9}-+-{'-'*5}-+-{'-'*8}-+-{'-'*12}")
         
         for epoch in range(self.config.epochs):
             model.train()
@@ -157,28 +167,32 @@ class NIDSTrainer:
             train_loss_avg = train_loss / len(train_loader)
             val_loss_avg = val_loss / len(val_loader)
             epoch_time = time.time() - start_time
+            current_lr = optimizer.param_groups[0]['lr']
             
+            # Check for improvement
+            improvement = val_loss_avg < best_val_loss
+            if improvement:
+                best_val_loss = val_loss_avg
+                
             train_history.append({
                 'epoch': epoch + 1,
                 'train_loss': train_loss_avg,
                 'val_loss': val_loss_avg,
-                'time': epoch_time
+                'time': epoch_time,
+                'learning_rate': current_lr
             })
             
             val_errors.extend(epoch_val_errors)
 
-            print(
-                f"Epoch {epoch + 1:2d}/{self.config.epochs} | "
-                f"Train Loss: {train_loss_avg:.6f} | "
-                f"Val Loss: {val_loss_avg:.6f} | "
-                f"Time: {epoch_time:.1f}s"
-            )
+            print(f"{epoch + 1:5d} | {train_loss_avg:11.6f} | {val_loss_avg:9.6f} | {epoch_time:5.1f}s | {current_lr:8.2e} | {'✓' if improvement else '-'}")
+        print(f"\nBest validation loss: {best_val_loss:.6f}")
+        print(f"Total training time: {sum(h['time'] for h in train_history):.1f}s")
         
         return model, train_history, val_errors
     
     def calculate_thresholds(self, val_errors):
         """Calculate detection thresholds from validation errors."""
-        print(f"\n📊 Calculating detection thresholds...")
+        print(f"\nCalculating detection thresholds from {len(val_errors)} validation samples...")
         
         val_errors = np.array(val_errors)
         thresholds = {
@@ -195,21 +209,21 @@ class NIDSTrainer:
         with open(self.config.threshold_path, "w") as f:
             json.dump(thresholds, f, indent=2)
         
-        print(f"✅ Thresholds saved to {self.config.threshold_path}")
-        print(f"   Mean: {thresholds['mean']:.6f}")
-        print(f"   95th percentile: {thresholds['p95']:.6f}")
-        print(f"   99th percentile: {thresholds['p99']:.6f}")
+        print(f"Thresholds saved to {self.config.threshold_path}")
+        print(f"Error statistics: mean={thresholds['mean']:.6f}, std={thresholds['std']:.6f}")
+        print(f"Percentiles: 90th={thresholds['p90']:.6f}, 95th={thresholds['p95']:.6f}, 99th={thresholds['p99']:.6f}")
         
         return thresholds
     
     def export_pytorch_model(self, model):
         """Export PyTorch model."""
+        model_size = self.config.pytorch_path.stat().st_size if hasattr(self.config.pytorch_path, 'stat') else 0
         torch.save(model.state_dict(), self.config.pytorch_path)
-        print(f"✅ PyTorch model saved to {self.config.pytorch_path}")
+        print(f"PyTorch model saved: {self.config.pytorch_path}")
     
     def export_onnx_model(self, model):
         """Export ONNX model for production."""
-        print(f"📦 Exporting to ONNX...")
+        print(f"Exporting ONNX model...")
         
         dummy_input = torch.randn(1, self.input_dim).to(self.device)
         torch.onnx.export(
@@ -223,11 +237,14 @@ class NIDSTrainer:
             output_names=["output"],
             dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
         )
-        print(f"✅ ONNX model saved to {self.config.onnx_path}")
+        
+        # Get file size
+        onnx_size = self.config.onnx_path.stat().st_size if hasattr(self.config.onnx_path, 'stat') else 0
+        print(f"ONNX model saved: {self.config.onnx_path} ({onnx_size/1024:.1f} KB)")
     
     def export_test_samples(self, num_samples=100):
         """Export test samples for validation."""
-        print(f"🧪 Exporting {num_samples} test samples...")
+        print(f"Exporting {num_samples} test samples...")
         
         # Load some benign samples
         X, labels = self.preprocessor.preprocess_data(self.config.dataset_path)
@@ -244,7 +261,7 @@ class NIDSTrainer:
         with open(self.config.test_samples_path, "w") as f:
             json.dump(test_samples, f, indent=2)
         
-        print(f"✅ Test samples saved to {self.config.test_samples_path}")
+        print(f"Test samples saved: {self.config.test_samples_path}")
     
     def export_training_metadata(self, train_history, thresholds):
         """Export training metadata and configuration."""
@@ -263,7 +280,14 @@ class NIDSTrainer:
             "model_architecture": {
                 "encoder_layers": [self.input_dim, 64, 32, 8],
                 "decoder_layers": [8, 32, 64, self.input_dim],
-                "latent_dim": 8
+                "latent_dim": 8,
+                "total_parameters": sum(p.numel() for p in Autoencoder(self.input_dim).parameters())
+            },
+            "performance": {
+                "best_val_loss": min(h['val_loss'] for h in train_history),
+                "final_train_loss": train_history[-1]['train_loss'],
+                "final_val_loss": train_history[-1]['val_loss'],
+                "total_training_time": sum(h['time'] for h in train_history)
             },
             "assets_generated": {
                 "pytorch_model": self.config.pytorch_path,
@@ -277,11 +301,11 @@ class NIDSTrainer:
         with open(self.config.metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
         
-        print(f"✅ Training metadata saved to {self.config.metadata_path}")
+        print(f"Training metadata saved: {self.config.metadata_path}")
     
     def train(self):
         """Main training pipeline."""
-        print("🚀 Starting NIDS Training Pipeline")
+        print("NIDS Training Pipeline")
         print("=" * 50)
         
         # 1. Load and prepare data
@@ -294,7 +318,7 @@ class NIDSTrainer:
         thresholds = self.calculate_thresholds(val_errors)
         
         # 4. Export assets
-        print(f"\n📦 Exporting production assets...")
+        print(f"\nExporting production assets...")
         self.export_pytorch_model(model)
         self.export_onnx_model(model)
         self.export_test_samples()
@@ -302,9 +326,8 @@ class NIDSTrainer:
         # 5. Export metadata
         self.export_training_metadata(train_history, thresholds)
         
-        print(f"\n🎉 Training completed successfully!")
-        print(f"📁 All assets saved to current directory")
-        print(f"🔧 Ready for production deployment!")
+        print(f"\nTraining completed successfully")
+        print(f"Assets ready for production deployment")
 
 
 class Config:
