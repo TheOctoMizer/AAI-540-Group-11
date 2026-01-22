@@ -1,0 +1,34 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# IDE
+.zed
+
+# Model
+**/*.pt
+**/*.onnx*
+**/*.bin
+**/*.json
+
+# Dataset
+**/*dataset*
+
+# Checkpoint
+**/*checkpoint*
+
+# Log
+**/*log
+
+# Rust Artifacts
+**/target
+
+# OS Artifacts
+**/.DS_Store
