@@ -1,45 +1,40 @@
-# Network Intrusion Detection System (NIDS)
+# Network Intrusion Detection System (NIDS) - Consolidated Version
 
-A comprehensive autoencoder-based Network Intrusion Detection System using PyTorch with ONNX export for production deployment.
+A streamlined autoencoder-based Network Intrusion Detection System with 3 main scripts: **Train**, **Evaluate**, and **Validate**.
 
 ## Overview
 
-This NIDS uses an autoencoder neural network trained on benign network traffic to detect anomalies and attacks. The system learns to reconstruct normal traffic patterns, with high reconstruction errors indicating potential intrusions.
+This NIDS uses an autoencoder neural network trained on benign network traffic to detect anomalies and attacks. The consolidated structure provides a clean, production-ready pipeline with comprehensive evaluation and validation capabilities.
 
 ### Key Features
+- **3-Script Architecture**: Train, Evaluate, Validate - clean separation of concerns
 - **Autoencoder Architecture**: 70+ features → 64 → 32 → 8 → 32 → 64 → 70+ features
 - **Multi-format Support**: PyTorch training with ONNX export for production
-- **Comprehensive Evaluation**: Detailed metrics, confusion matrix, attack-type analysis
-- **Production Ready**: Scaler parameter export for Rust/AWS Lambda deployment
-- **Consistent Preprocessing**: Shared preprocessing pipeline ensures reproducibility
+- **Comprehensive Evaluation**: Detailed metrics, attack-type analysis, threshold optimization
+- **Production Ready**: All asset generation integrated into training script
+- **Robust Validation**: Cross-validation, threshold optimization, multi-dataset testing
 
-## Project Structure
+## Consolidated Project Structure
 
 ```
 nids_train/
-├── Core Scripts
-│   ├── train_nids.py              # Main training script
-│   ├── preprocessing.py           # Shared preprocessing utilities
-│   └── evaluate_nids.py           # Comprehensive evaluation framework
+├── Core Scripts (NEW)
+│   ├── train.py                    # Training + asset export (consolidated)
+│   ├── evaluate.py                 # Comprehensive testing (consolidated)
+│   └── validate.py                 # Validation & threshold analysis (NEW)
 │
-├── Testing Scripts  
-│   ├── test_nids_torch.py         # PyTorch model testing
-│   ├── test_nids_onnx.py          # ONNX model testing
-│   └── test_attacks_onnx.py       # Attack detection evaluation
+├── Supporting Modules
+│   ├── preprocessing.py             # Shared preprocessing utilities
+│   └── README_consolidated.md       # This file
 │
-├── Production Export
-│   ├── export_scaler.py           # Export scaler parameters
-│   ├── export_rust_assets.py      # Export all assets for Rust
-│   └── export_test_samples.py     # Export test samples
+├── Dataset  
+│   └── nids_dataset/               # CIC-IDS2017 dataset files
 │
-├── Dataset
-│   └── nids_dataset/              # CIC-IDS2017 dataset files
-│
-└── Generated Assets
-    ├── nids_autoencoder.pt        # PyTorch model
-    ├── nids_autoencoder.onnx      # ONNX model  
-    ├── scaler_params.json         # Scaler parameters
-    └── detection_threshold.json   # Detection thresholds
+└── Legacy Scripts (deprecated)
+    ├── train_nids.py               # Old training script
+    ├── test_*.py                   # Old testing scripts
+    ├── export_*.py                 # Old export scripts
+    └── evaluate_nids.py            # Old evaluation script
 ```
 
 ## Quick Start
@@ -48,7 +43,7 @@ nids_train/
 
 ```bash
 # Install dependencies
-pip install torch pandas scikit-learn onnxruntime
+pip install torch pandas scikit-learn onnxruntime matplotlib seaborn
 
 # Download CIC-IDS2017 dataset to nids_dataset/
 # Required files:
@@ -56,79 +51,193 @@ pip install torch pandas scikit-learn onnxruntime
 # - Wednesday-workingHours.pcap_ISCX.csv (attacks)
 ```
 
-### 2. Train Model
+### 2. Train Model (with automatic asset export)
 
 ```bash
-python train_nids.py
+# Basic training
+python train.py
+
+# Custom training parameters
+python train.py --epochs 20 --batch-size 2048 --learning-rate 1e-4
+
+# Custom output paths
+python train.py --onnx-output models/nids_v2.onnx --scaler-output models/scaler_v2.json
 ```
 
-**Output:**
+**Generated Assets:**
 - `nids_autoencoder.pt` - PyTorch model
 - `nids_autoencoder.onnx` - ONNX model  
 - `scaler_params.json` - Preprocessing parameters
 - `detection_threshold.json` - Detection thresholds
+- `test_samples.json` - Test samples for validation
+- `training_metadata.json` - Training configuration and history
 
 ### 3. Evaluate Model
 
 ```bash
-# Test on benign traffic
-python test_nids_onnx.py
+# Basic evaluation
+python evaluate.py --data ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv
 
-# Test attack detection
-python test_attacks_onnx.py
+# Comprehensive evaluation with threshold sweep
+python evaluate.py --data ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv --threshold-sweep
 
-# Comprehensive evaluation with metrics
-python evaluate_nids.py --data ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv
+# Evaluate PyTorch model
+python evaluate.py --model nids_autoencoder.pt --type pytorch --data ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv
+
+# Custom threshold percentile
+python evaluate.py --data ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv --threshold-percentile 95.0
 ```
 
-## Usage Examples
-
-### Training with Custom Parameters
-
-```python
-# Edit train_nids.py constants
-BATCH_SIZE = 2048
-EPOCHS = 20
-LEARNING_RATE = 1e-4
-```
-
-### Attack Detection with Custom Threshold
+### 4. Validate Model
 
 ```bash
-python test_attacks_onnx.py --threshold 95.0 --output custom_results.json
+# Cross-validation (requires benign dataset)
+python validate.py --dataset ./nids_dataset/Monday-WorkingHours.pcap_ISCX.csv --cross-validation
+
+# Threshold optimization
+python validate.py --dataset ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv --threshold-optimization
+
+# Multi-dataset validation
+python validate.py --datasets ./nids_dataset/Tuesday-WorkingHours.pcap_ISCX.csv ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv --multi-dataset
+
+# Comprehensive validation (all methods)
+python validate.py --dataset ./nids_dataset/Monday-WorkingHours.pcap_ISCX.csv --cross-validation --threshold-optimization
 ```
 
-### Comprehensive Evaluation
+## Detailed Usage
 
+### Training Script (`train.py`)
+
+**Features:**
+- Complete training pipeline with validation
+- Automatic asset export (PyTorch, ONNX, scaler, thresholds)
+- Training history tracking
+- Configurable hyperparameters
+- Test sample generation
+
+**Command Options:**
 ```bash
-# Evaluate ONNX model
-python evaluate_nids.py --model nids_autoencoder.onnx --data ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv --type onnx
+python train.py [OPTIONS]
 
-# Evaluate PyTorch model  
-python evaluate_nids.py --model nids_autoencoder.pt --data ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv --type pytorch
+Data Options:
+  --dataset PATH                Training dataset path
+  --val-split FLOAT             Validation split ratio (default: 0.2)
+
+Training Options:
+  --batch-size INT              Batch size (default: 1024)
+  --epochs INT                  Training epochs (default: 10)
+  --learning-rate FLOAT         Learning rate (default: 1e-3)
+
+Output Options:
+  --pytorch-output PATH         PyTorch model output
+  --onnx-output PATH            ONNX model output
+  --scaler-output PATH          Scaler parameters output
+  --threshold-output PATH       Detection thresholds output
+  --test-samples-output PATH    Test samples output
+  --metadata-output PATH        Training metadata output
 ```
 
-## Model Architecture
-
-### Autoencoder Structure
+**Example:**
+```bash
+python train.py \
+  --dataset ./nids_dataset/Monday-WorkingHours.pcap_ISCX.csv \
+  --epochs 15 \
+  --batch-size 2048 \
+  --learning-rate 5e-4 \
+  --onnx-output models/nids_prod.onnx \
+  --threshold-output models/thresholds.json
 ```
-Input (78 features) → Dense(64) → ReLU → Dense(32) → ReLU → Dense(8) → ReLU
-                     ↓
-                 Latent Space (8 dimensions)
-                     ↓  
-Dense(32) → ReLU → Dense(64) → ReLU → Dense(78) → Sigmoid → Output
+
+### Evaluation Script (`evaluate.py`)
+
+**Features:**
+- Comprehensive metrics (accuracy, precision, recall, F1, AUC)
+- Attack-type specific analysis
+- Threshold sweep analysis
+- Performance benchmarking
+- Detailed result export
+
+**Command Options:**
+```bash
+python evaluate.py [OPTIONS]
+
+Model Options:
+  --model PATH                  Model file path
+  --type {onnx,pytorch}        Model type (default: onnx)
+  --scaler PATH                 Scaler parameters path
+  --threshold PATH              Threshold file path
+
+Evaluation Options:
+  --data PATH                   Test dataset path (required)
+  --threshold-percentile FLOAT Threshold percentile (default: 99.0)
+  --batch-size INT              Batch size (default: 1024)
+
+Analysis Options:
+  --no-attack-analysis         Skip attack type analysis
+  --threshold-sweep            Perform threshold sweep analysis
+
+Output:
+  --output PATH                 Results output file
 ```
 
-### Training Details
-- **Loss Function**: Mean Squared Error (MSE)
-- **Optimizer**: Adam (lr=1e-3)
-- **Training Data**: Only benign traffic (Monday dataset)
-- **Validation**: 20% split of benign data
-- **Device**: MPS (Apple Silicon) or CPU fallback
+**Example:**
+```bash
+python evaluate.py \
+  --model nids_autoencoder.onnx \
+  --data ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv \
+  --threshold-sweep \
+  --output results/wednesday_evaluation.json
+```
+
+### Validation Script (`validate.py`)
+
+**Features:**
+- K-fold cross-validation
+- Threshold optimization (percentile, Youden's J, max F1)
+- Multi-dataset validation
+- Statistical significance testing
+- Robustness analysis
+
+**Command Options:**
+```bash
+python validate.py [OPTIONS]
+
+Model Options:
+  --model PATH                  Model file path
+  --type {onnx,pytorch}        Model type (default: onnx)
+  --scaler PATH                 Scaler parameters path
+  --batch-size INT              Batch size (default: 1024)
+
+Validation Options:
+  --dataset PATH                Single dataset for validation
+  --datasets PATH [PATH ...]    Multiple datasets for validation
+  --cross-validation            Perform k-fold cross-validation
+  --threshold-optimization      Perform threshold optimization
+  --multi-dataset              Validate across multiple datasets
+
+Output:
+  --output PATH                 Validation results output file
+```
+
+**Example:**
+```bash
+# Comprehensive validation
+python validate.py \
+  --dataset ./nids_dataset/Monday-WorkingHours.pcap_ISCX.csv \
+  --cross-validation \
+  --threshold-optimization \
+  --output results/comprehensive_validation.json
+
+# Multi-dataset robustness check
+python validate.py \
+  --datasets ./nids_dataset/Tuesday-WorkingHours.pcap_ISCX.csv \
+            ./nids_dataset/Wednesday-workingHours.pcap_ISCX.csv \
+            ./nids_dataset/Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv \
+  --multi-dataset \
+  --output results/robustness_check.json
+```
 
 ## Evaluation Metrics
-
-The system provides comprehensive evaluation metrics:
 
 ### Detection Performance
 - **Accuracy**: Overall classification accuracy
@@ -142,41 +251,30 @@ The system provides comprehensive evaluation metrics:
 - **False Negative Rate**: Attacks missed by the system
 - **Reconstruction Error Statistics**: Mean, std, percentiles
 
-### Attack Type Breakdown
-Detailed analysis by attack category:
-- DoS (Denial of Service)
-- PortScan
-- Web Attacks
-- Infiltration
-- Botnet
-- DDoS
+### Threshold Optimization Methods
+1. **Percentile-based**: 90th, 95th, 99th, 99.5th, 99.9th percentiles
+2. **Youden's J Statistic**: Maximizes sensitivity + specificity - 1
+3. **Maximum F1-Score**: Optimizes for F1-score
 
 ## Production Deployment
 
-### Export Assets for Rust/AWS Lambda
+### Asset Generation
+The training script automatically generates all production assets:
 
 ```bash
-# Export scaler parameters
-python export_scaler.py
-
-# Export all required assets  
-python export_rust_assets.py
-
-# Export test samples for validation
-python export_test_samples.py
+python train.py
 ```
 
-### Required Production Files
+**Required Production Files:**
 - `nids_autoencoder.onnx` - Model weights
 - `scaler_params.json` - Feature scaling parameters
 - `detection_threshold.json` - Detection thresholds
 
 ### Integration Example (Rust)
 ```rust
-// Load scaler parameters
+// Load assets
 let scaler_params = load_scaler("scaler_params.json")?;
-
-// Load ONNX model
+let thresholds = load_thresholds("detection_threshold.json")?;
 let session = ort::Session::new(&env, "nids_autoencoder.onnx")?;
 
 // Process network flow
@@ -185,88 +283,116 @@ let reconstruction = session.run(scaled_features)?;
 let error = calculate_mse(&reconstruction, &scaled_features);
 
 // Detect intrusion
-let is_attack = error > threshold;
+let is_attack = error > thresholds.p99;
 ```
 
 ## Advanced Configuration
 
-### Custom Preprocessing
+### Custom Training Configuration
 ```python
-from preprocessing import NIDSPreprocessor
-
-# Initialize with custom scaler path
-preprocessor = NIDSPreprocessor("custom_scaler.json")
-
-# Fit on training data
-preprocessor.fit_scaler("training_data.csv")
-
-# Process new data
-X, labels = preprocessor.preprocess_data("test_data.csv")
+# Modify training parameters in train.py or use CLI
+config = {
+    "batch_size": 2048,
+    "epochs": 20,
+    "learning_rate": 1e-4,
+    "val_split": 0.15
+}
 ```
 
-### Threshold Selection
-The system automatically calculates multiple threshold percentiles:
-- **95th percentile**: Lower false positives, higher false negatives
-- **99th percentile**: Balanced detection (recommended)
-- **99.9th percentile**: Lower false negatives, higher false positives
+### Threshold Selection Strategy
+- **High Security**: Use 95th percentile (lower threshold, more sensitive)
+- **Balanced**: Use 99th percentile (recommended)
+- **Low False Positives**: Use 99.9th percentile (higher threshold)
 
-### Batch Processing
-```python
-# Process large datasets efficiently
-from evaluate_nids import NIDSEvaluator
-
-evaluator = NIDSEvaluator("nids_autoencoder.onnx")
-metrics = evaluator.evaluate_dataset("large_dataset.csv")
+### Cross-Validation for Robustness
+```bash
+# 5-fold cross-validation on benign data
+python validate.py --dataset benign_data.csv --cross-validation
 ```
+
+## Expected Performance
+
+Based on CIC-IDS2017 dataset:
+
+| Metric | Benign Data | Attack Data |
+|--------|-------------|-------------|
+| Accuracy | > 99% | 85-95% |
+| Detection Rate | N/A | 80-95% |
+| False Positive Rate | < 1% | N/A |
+| F1-Score | N/A | 0.85-0.95 |
+
+*Performance varies by attack type and threshold selection*
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Model Architecture Mismatch**
+1. **Missing Assets**
    ```
-   Error: size mismatch between saved model and current architecture
+   FileNotFoundError: scaler_params.json
    ```
-   **Solution**: Ensure all scripts use the same autoencoder architecture (8-dim latent space)
+   **Solution**: Run `python train.py` to generate all assets
 
-2. **Scaler Inconsistency**  
+2. **Model Architecture Mismatch**
    ```
-   Error: Feature dimension mismatch
+   Error: size mismatch between model and data
    ```
-   **Solution**: Use `export_scaler.py` to regenerate scaler parameters
+   **Solution**: Ensure all scripts use the same preprocessing pipeline
 
-3. **Missing Threshold File**
+3. **Memory Issues**
    ```
-   FileNotFoundError: detection_threshold.json
+   CUDA out of memory
    ```
-   **Solution**: Run training script to generate thresholds, or use evaluate_nids.py for automatic calculation
+   **Solution**: Reduce batch size or use CPU training
 
 ### Performance Optimization
 
-- **Batch Size**: Increase for faster training (memory permitting)
-- **GPU Acceleration**: Use CUDA-enabled PyTorch for training
-- **ONNX Optimization**: Use ONNX Runtime for optimized inference
+- **Training**: Increase batch size, use GPU acceleration
+- **Inference**: Use ONNX Runtime, batch processing
+- **Threshold**: Use validation set to optimize threshold
+
+## Migration from Legacy Scripts
+
+### From Old Training Scripts
+```bash
+# OLD
+python train_nids.py
+python export_scaler.py
+python export_rust_assets.py
+
+# NEW (consolidated)
+python train.py
+```
+
+### From Old Testing Scripts
+```bash
+# OLD
+python test_attacks_onnx.py
+python evaluate_nids.py --data attacks.csv
+
+# NEW (consolidated)
+python evaluate.py --data attacks.csv --threshold-sweep
+```
 
 ## Dataset Information
 
 **CIC-IDS2017 Dataset** - Realistic network traffic capture:
-- **Monday**: Benign traffic only (training)
+- **Monday**: Benign traffic only (training/validation)
 - **Tuesday**: FTP/SSH brute force attacks  
 - **Wednesday**: DoS/DDoS attacks
 - **Thursday**: Web attacks, infiltration
 - **Friday**: Botnet, port scan, DDoS attacks
 
-### Feature Engineering
-78 network flow features including:
-- Basic features (duration, protocol, packet counts)
-- Flow statistics (IAT, flow bytes/packets)
-- Time-related features (forward/backward IAT)
-- Header statistics (TCP flags, packet size)
+### Recommended Dataset Usage
+- **Training**: Monday-WorkingHours.pcap_ISCX.csv (benign only)
+- **Validation**: Split from Monday data
+- **Testing**: Any other day's data (contains attacks)
+- **Robustness**: Multiple days for cross-validation
 
 ## Contributing
 
 1. **Code Style**: Follow PEP 8, use type hints
-2. **Testing**: Add unit tests for new features
+2. **Testing**: Add validation tests for new features
 3. **Documentation**: Update README for API changes
 4. **Performance**: Benchmark changes before submission
 
