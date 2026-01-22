@@ -326,8 +326,7 @@ class NIDSTrainer:
         # 5. Export metadata
         self.export_training_metadata(train_history, thresholds)
         
-        print(f"\nTraining completed successfully")
-        print(f"Assets ready for production deployment")
+        print("Training completed successfully")
 
 
 class Config:
