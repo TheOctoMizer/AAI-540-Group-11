@@ -5,10 +5,31 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-ndarray = "0.17.2"
-ort = { version = "2.0.0-rc.11", features = ["load-dynamic", "ndarray", "download-binaries"] }
+tract-onnx = "0.22.0"
 serde = { version = "1.0.228", features = ["derive"]}
 serde_json = "1.0.149"
 pnet = "0.35.0"
 tokio = { version = "1.0", features = ["full"] }
 clap = { version = "4.0", features = ["derive"] }
+env_logger = "0.11.0"
+log = "0.4.0"
+
+# HTTP server
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# AWS SDK
+aws-config = { version = "1.1", features = ["behavior-version-latest"] }
+aws-sdk-sagemakerruntime = "1.15"
+aws-sdk-lambda = "1.15"
+
+# Data loading
+polars = { version = "0.36", features = ["lazy", "csv", "parquet"] }
+csv = "1.3"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json"] }
+
+# Utilities
+chrono = "0.4"
