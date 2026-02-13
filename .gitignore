@@ -1,34 +1,95 @@
-# Python-generated files
+# OS Specific
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+**/.DS_Store
+
+# IDEs and Editors
+.zed/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.flakes/
+lib/
+lib64/
+parts/
+sdist/
+var/
 wheels/
-*.egg-info
-
-# Virtual environments
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 .venv
+venv/
+ENV/
+env/
+.env
+.python-version
+# uv
+uv.lock
 
-# IDE
-.zed
+# Go
+/go_server/bin/
+/go_server/go_server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
 
-# Model
+# Rust
+ai_nids_rust/target/
+**/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Project Specific Artifacts
+
+# Models & Weights
 **/*.pt
+**/*.pth
 **/*.onnx*
 **/*.bin
-**/*.json
+**/*.model
+**/*.joblib
 
-# Dataset
+# Datasets & Data
 **/*dataset*
+**/*.csv
+**/*.parquet
+**/*.h5
 
-# Checkpoint
+# Checkpoints & Logs
 **/*checkpoint*
-
-# Log
 **/*log
+**/logs/
+**/output/
 
-# Rust Artifacts
-**/target
-
-# OS Artifacts
-**/.DS_Store
+# General Config & Outputs
+# Note: Broadly ignoring JSON as they are often model outputs or large data catalogs in this project.
+# If you have specific config JSONs that should be tracked, add them with ! (e.g., !sagemaker_deploy/config.json)
+**/*.json
+!package.json
+!tsconfig.json
+!composer.json
