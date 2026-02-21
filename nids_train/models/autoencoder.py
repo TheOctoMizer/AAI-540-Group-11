@@ -13,7 +13,7 @@ class Autoencoder(nn.Module):
             nn.ReLU(),
         )
 
-        self.docoder = nn.Sequential(
+        self.decoder = nn.Sequential(
             nn.Linear(latent_dim, 32),
             nn.ReLU(),
             nn.Linear(32, 64),
@@ -22,4 +22,6 @@ class Autoencoder(nn.Module):
             nn.Sigmoid(),
         )
     def forward(self, x):
-        return self.docoder(self.encoder(x))
+        encoded = self.encoder(x)
+        reconstruction = self.decoder(encoded)
+        return reconstruction, encoded

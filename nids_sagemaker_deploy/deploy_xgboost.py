@@ -50,9 +50,12 @@ def package_model(model_path: str, label_map_path: str, inference_script: str, o
     """
     Package model artifacts + inference code for SageMaker deployment.
 
-    SageMaker expects a model.tar.gz that optionally contains a 'code/'
-    sub-directory with the entry-point script. We bundle everything into
-    a single archive so no separate code upload is needed.
+    Archive structure:
+        xgb_classifier.onnx
+        xgb_label_map.json
+        code/
+            inference.py
+            requirements.txt   ← auto-installed by the PyTorch DLC on startup
 
     Returns:
         Path to model.tar.gz
@@ -61,16 +64,23 @@ def package_model(model_path: str, label_map_path: str, inference_script: str, o
 
     os.makedirs(output_dir, exist_ok=True)
 
+    # Write requirements.txt for the container to install on startup
+    # The PyTorch DLC does not ship with onnxruntime, so we must declare it here.
+    req_path = Path(output_dir) / "requirements.txt"
+    req_path.write_text("onnxruntime>=1.16.0\nnumpy\n")
+
     model_archive = Path(output_dir) / "model.tar.gz"
     with tarfile.open(model_archive, "w:gz") as tar:
         tar.add(model_path,        arcname="xgb_classifier.onnx")
         tar.add(label_map_path,    arcname="xgb_label_map.json")
         tar.add(inference_script,  arcname="code/inference.py")
+        tar.add(str(req_path),     arcname="code/requirements.txt")
 
     print(f"Model packaged: {model_archive}")
     print(f"  - xgb_classifier.onnx")
     print(f"  - xgb_label_map.json")
     print(f"  - code/inference.py")
+    print(f"  - code/requirements.txt  (onnxruntime>=1.16.0)")
 
     return str(model_archive)
 
@@ -134,7 +144,6 @@ def deploy_to_sagemaker(
             "ModelDataUrl": model_data,
             "Environment": {
                 "SAGEMAKER_PROGRAM": "inference.py",
-                "SAGEMAKER_SUBMIT_DIRECTORY": "/opt/ml/model/code",
             },
         },
         ExecutionRoleArn=role,

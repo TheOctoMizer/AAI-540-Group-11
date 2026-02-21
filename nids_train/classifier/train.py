@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 
 import numpy as np
+import torch
+import torch.nn as nn
 import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
@@ -12,17 +14,75 @@ from export.export_xgb_onnx import export_xgb_to_onnx
 from .eval_xgb import evaluate_xgb_onnx_consistency
 
 
-def train_xgboost_classifier(data_dir, dataset, output_dir, export_onnx=True, evaluate_consistency=True):
+# ---------------------------------------------------------------------------
+# Local copy of the autoencoder architecture (must match training)
+# ---------------------------------------------------------------------------
+class _Autoencoder(nn.Module):
+    def __init__(self, input_dim, latent_dim=8):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 64), nn.ReLU(),
+            nn.Linear(64, 32), nn.ReLU(),
+            nn.Linear(32, latent_dim), nn.ReLU(),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 32), nn.ReLU(),
+            nn.Linear(32, 64), nn.ReLU(),
+            nn.Linear(64, input_dim), nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        reconstruction = self.decoder(encoded)
+        return reconstruction, encoded
+
+
+def _encode_features(X: np.ndarray, autoencoder_path: str, latent_dim: int = 8) -> np.ndarray:
+    """
+    Encode raw features through the autoencoder's encoder.
+
+    Args:
+        X: Raw features array of shape (N, 77)
+        autoencoder_path: Path to autoencoder.pt weights
+        latent_dim: Size of the latent bottleneck (default 8)
+
+    Returns:
+        Encoded features of shape (N, latent_dim)
+    """
+    device = torch.device("cpu")
+    input_dim = X.shape[1]
+
+    model = _Autoencoder(input_dim=input_dim, latent_dim=latent_dim).to(device)
+    model.load_state_dict(torch.load(autoencoder_path, map_location=device), strict=False)
+    model.eval()
+
+    print(f"Autoencoder loaded from {autoencoder_path}")
+    print(f"  Input dim : {input_dim}")
+    print(f"  Latent dim: {latent_dim}")
+
+    with torch.no_grad():
+        tensor_in = torch.FloatTensor(X).to(device)
+        encoded = model.encoder(tensor_in).cpu().numpy()
+
+    print(f"  Encoded shape: {encoded.shape}")
+    return encoded.astype(np.float32)
+
+
+def train_xgboost_classifier(
+    data_dir,
+    dataset,
+    output_dir,
+    autoencoder_path=None,
+    latent_dim=8,
+    export_onnx=True,
+    evaluate_consistency=True,
+):
     """
     Train XGBoost classifier for attack classification.
-    
-    Args:
-        data_dir (str): Directory containing the dataset
-        dataset (str): Dataset filename
-        output_dir (str): Directory to save the trained model
-        export_onnx (bool): Whether to export to ONNX format
-        evaluate_consistency (bool): Whether to evaluate XGBoost vs ONNX consistency
-    
+
+    When *autoencoder_path* is provided the raw features are first encoded
+    through the autoencoder so that XGBoost learns on the latent space.
+
     Returns:
         tuple: (trained_model, label_encoder, test_accuracy, onnx_consistency)
     """
@@ -45,6 +105,18 @@ def train_xgboost_classifier(data_dir, dataset, output_dir, export_onnx=True, ev
 
     print(f"Attack samples: {len(X_attack)}")
     print("Attack classes:", np.unique(y_attack))
+
+    # -----------------------------
+    # Encode through autoencoder
+    # -----------------------------
+    if autoencoder_path is not None:
+        print("\nEncoding attack features through autoencoder ...")
+        X_attack = _encode_features(X_attack, autoencoder_path, latent_dim=latent_dim)
+    else:
+        print("\n[WARN] No autoencoder provided — training on raw features.")
+
+    input_dim = X_attack.shape[1]
+    print(f"XGBoost input dim: {input_dim}")
 
     # Encode labels
     encoder = LabelEncoder()
@@ -100,13 +172,14 @@ def train_xgboost_classifier(data_dir, dataset, output_dir, export_onnx=True, ev
         print("\nExporting to ONNX format...")
         onnx_path = output_dir / "xgb_classifier.onnx"
         label_map_path = output_dir / "xgb_label_map.json"
-        
+
         export_xgb_to_onnx(
             model_path=model_path,
             label_map_path=label_map_path,
-            output_path=onnx_path
+            output_path=onnx_path,
+            input_dim=input_dim,
         )
-        
+
         # Evaluate consistency if requested
         if evaluate_consistency:
             print("Evaluating XGBoost vs ONNX consistency...")
@@ -115,18 +188,19 @@ def train_xgboost_classifier(data_dir, dataset, output_dir, export_onnx=True, ev
                 onnx_path=onnx_path,
                 data_dir=data_dir,
                 dataset=dataset,
-                num_samples=100
+                autoencoder_path=autoencoder_path,
+                latent_dim=latent_dim,
+                num_samples=100,
             )
-            
+
             onnx_consistency = {
                 "max_difference": max_diff,
-                "mean_difference": mean_diff
+                "mean_difference": mean_diff,
             }
-            
+
             print(f"Max probability difference: {max_diff:.6e}")
             print(f"Mean probability difference: {mean_diff:.6e}")
-            
-            # Quality assessment
+
             if max_diff < 1e-6:
                 print("Excellent ONNX conversion (diff < 1e-6)")
             elif max_diff < 1e-4:

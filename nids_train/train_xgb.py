@@ -17,6 +17,10 @@ def main():
                        help="Dataset filename")
     parser.add_argument("--output-dir", type=str, default="./model",
                        help="Directory to save the trained model")
+    parser.add_argument("--autoencoder-model", type=str, default=None,
+                       help="Path to autoencoder.pt weights (if provided, XGBoost trains on encoded features)")
+    parser.add_argument("--latent-dim", type=int, default=8,
+                       help="Autoencoder latent dimension (default: 8)")
     parser.add_argument("--no-onnx", action="store_true",
                        help="Skip ONNX export and consistency evaluation")
     parser.add_argument("--no-consistency", action="store_true",
@@ -27,6 +31,8 @@ def main():
     print(f"Data directory: {args.data_dir}")
     print(f"Dataset: {args.dataset}")
     print(f"Output directory: {args.output_dir}")
+    print(f"Autoencoder model: {args.autoencoder_model or 'None (raw features)'}")
+    print(f"Latent dim: {args.latent_dim}")
     print(f"Export ONNX: {not args.no_onnx}")
     print(f"Evaluate consistency: {not args.no_consistency}")
     print("-" * 50)
@@ -36,8 +42,10 @@ def main():
         data_dir=args.data_dir,
         dataset=args.dataset,
         output_dir=args.output_dir,
+        autoencoder_path=args.autoencoder_model,
+        latent_dim=args.latent_dim,
         export_onnx=not args.no_onnx,
-        evaluate_consistency=not args.no_consistency
+        evaluate_consistency=not args.no_consistency,
     )
 
     print("-" * 50)

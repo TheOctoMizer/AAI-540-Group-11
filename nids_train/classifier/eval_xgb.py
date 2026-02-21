@@ -6,17 +6,21 @@ from pathlib import Path
 from preprocessing.nids_preprocessor import NIDSPreprocessor
 
 
-def evaluate_xgb_onnx_consistency(model_path, onnx_path, data_dir, dataset, num_samples=10):
+def evaluate_xgb_onnx_consistency(
+    model_path,
+    onnx_path,
+    data_dir,
+    dataset,
+    autoencoder_path=None,
+    latent_dim=8,
+    num_samples=10,
+):
     """
     Evaluate consistency between XGBoost and ONNX models.
     
-    Args:
-        model_path (Path): Path to XGBoost model file
-        onnx_path (Path): Path to ONNX model file
-        data_dir (str): Directory containing the dataset
-        dataset (str): Dataset filename
-        num_samples (int): Number of samples to test (default: 10)
-    
+    When autoencoder_path is provided, raw features are first encoded
+    through the autoencoder (matching the training pipeline).
+
     Returns:
         tuple: (max_difference, mean_difference, xgb_probs, onnx_probs)
     """
@@ -29,6 +33,11 @@ def evaluate_xgb_onnx_consistency(model_path, onnx_path, data_dir, dataset, num_
 
     mask = labels != "BENIGN"
     X_attack = X[mask][:num_samples]
+
+    # Encode through autoencoder if provided
+    if autoencoder_path is not None:
+        from .train import _encode_features
+        X_attack = _encode_features(X_attack, autoencoder_path, latent_dim=latent_dim)
 
     # Load models
     xgb_model = xgb.XGBClassifier()

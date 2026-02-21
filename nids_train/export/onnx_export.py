@@ -8,7 +8,8 @@ def export_onnx(model, input_dim, output_path):
     # Define dynamic axes for batch dimension
     dynamic_axes = {
         'input': {0: 'batch_size'},
-        'reconstruction': {0: 'batch_size'}
+        'reconstruction': {0: 'batch_size'},
+        'encoded': {0: 'batch_size'}
     }
 
     torch.onnx.export(
@@ -19,7 +20,7 @@ def export_onnx(model, input_dim, output_path):
         opset_version=18,
         do_constant_folding=True,
         input_names=["input"],
-        output_names=["reconstruction"],
+        output_names=["reconstruction", "encoded"],
         dynamic_axes=dynamic_axes,
         dynamo=False,  # Disable dynamo to avoid shape inference issues
     )

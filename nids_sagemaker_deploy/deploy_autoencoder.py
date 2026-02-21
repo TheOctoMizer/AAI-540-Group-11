@@ -162,7 +162,6 @@ def deploy_to_sagemaker(
             "ModelDataUrl": model_data,
             "Environment": {
                 "SAGEMAKER_PROGRAM": "inference.py",
-                "SAGEMAKER_SUBMIT_DIRECTORY": "/opt/ml/model/code",
             },
         },
         ExecutionRoleArn=role,
