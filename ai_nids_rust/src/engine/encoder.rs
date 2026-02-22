@@ -11,7 +11,7 @@ pub struct Autoencoder {
 impl Autoencoder {
     pub fn new(model_path: &str) -> Result<Self> {
         let start_time = Instant::now();
-        
+
         log::info!("Loading autoencoder model from: {}", model_path);
 
         let input_size = 77;
@@ -21,11 +21,11 @@ impl Autoencoder {
             .context("Failed to load autoencoder ONNX model")?
             .with_input_fact(
                 0,
-                InferenceFact::dt_shape(f32::datum_type(), tvec!(1, input_size)),
+                InferenceFact::dt_shape(f32::datum_type(), tvec!(1usize, input_size)),
             )
             .context("Failed to set autoencoder input fact")?
-            .into_optimized()
-            .context("Failed to optimize autoencoder model")?
+            .into_typed()
+            .context("Failed to type autoencoder model")?
             .into_runnable()
             .context("Failed to make autoencoder model runnable")?;
 
@@ -45,18 +45,18 @@ impl Autoencoder {
 
         let load_time = start_time.elapsed();
         log::info!("Autoencoder model loaded successfully in {:?}", load_time);
-        
-        Ok(Self { 
+
+        Ok(Self {
             model,
             input_size,
             output_size,
         })
     }
-    
-    pub fn encode(&self, input: Vec<f32>) -> Result<Vec<f32>> {
+
+    pub fn encode(&self, input: Vec<f32>) -> Result<(Vec<f32>, f32)> {
         let start_time = Instant::now();
-        
-        log::debug!("Encoding input with {} features", input.len());
+
+        log::debug!("Running local autoencoder with {} features", input.len());
 
         if input.len() != self.input_size {
             anyhow::bail!(
@@ -66,8 +66,9 @@ impl Autoencoder {
             );
         }
 
-        let input_array = tract_ndarray::Array2::from_shape_vec((1, self.input_size), input)
-            .context("Failed to build autoencoder input array")?;
+        let input_array =
+            tract_ndarray::Array2::from_shape_vec((1, self.input_size), input.clone())
+                .context("Failed to build autoencoder input array")?;
         let input_tensor: Tensor = input_array.into();
 
         let outputs = self
@@ -75,31 +76,41 @@ impl Autoencoder {
             .run(tvec!(input_tensor.into()))
             .context("Failed to run autoencoder inference")?;
 
-        // Expect output shape [1, output_size]
-        let out = outputs[0]
+        // Expect at least two outputs: [reconstruction, encoded]
+        // Reconstruction is used for MSE calculation, encoded for classification
+        let reconstruction_view = outputs[0]
             .to_array_view::<f32>()
-            .context("Failed to view autoencoder output as f32")?;
+            .context("Failed to view reconstruction output as f32")?;
 
-        let encoded: Vec<f32> = out.iter().copied().collect();
+        let encoded_view = outputs
+            .get(1)
+            .context("Model missing 'encoded' output (index 1)")?
+            .to_array_view::<f32>()
+            .context("Failed to view encoded output as f32")?;
 
-        if encoded.len() != self.output_size {
-            log::warn!(
-                "Autoencoder output length mismatch: expected {}, got {}",
-                self.output_size,
-                encoded.len()
-            );
+        // Calculate MSE: mean((input - reconstruction)^2)
+        let mut sum_sq_err = 0.0f32;
+        for (i, &rec) in reconstruction_view.iter().enumerate() {
+            let err = input[i] - rec;
+            sum_sq_err += err * err;
         }
-        
+        let mse_error = sum_sq_err / self.input_size as f32;
+
+        let encoded: Vec<f32> = encoded_view.iter().copied().collect();
+
         let inference_time = start_time.elapsed();
-        log::debug!("Autoencoder inference completed in {:?}", inference_time);
-        
-        Ok(encoded)
+        log::debug!(
+            "Local Autoencoder inference completed in {:?}",
+            inference_time
+        );
+
+        Ok((encoded, mse_error))
     }
-    
+
     pub fn get_input_shape(&self) -> Result<Vec<usize>> {
         Ok(vec![1, self.input_size])
     }
-    
+
     pub fn get_output_shape(&self) -> Result<Vec<usize>> {
         Ok(vec![1, self.output_size])
     }

@@ -17,6 +17,7 @@ use std::time::Instant;
 use tower_http::trace::TraceLayer;
 
 use data::loader::ProductionDataset;
+use engine::encoder::Autoencoder;
 use engine::lambda::{AttackInfo, LambdaTrigger};
 use engine::sagemaker::SageMakerRuntime;
 
@@ -26,6 +27,9 @@ use engine::sagemaker::SageMakerRuntime;
 struct Args {
     #[arg(short, long, default_value = "info")]
     log_level: String,
+
+    #[arg(long, default_value = "models/autoencoder_fp32.onnx")]
+    autoencoder_model: String,
 
     #[arg(long, default_value = "nids-autoencoder")]
     autoencoder_endpoint: String,
@@ -48,6 +52,7 @@ struct Args {
 
 #[derive(Clone)]
 struct AppState {
+    local_ae: Arc<Autoencoder>,
     sagemaker: Arc<SageMakerRuntime>,
     lambda: Arc<LambdaTrigger>,
     production_data_dir: PathBuf,
@@ -163,12 +168,11 @@ async fn trigger_simulation(
     {
         log::debug!("Processing sample {}/{}", idx + 1, dataset.len());
 
-        // Step 1: Call autoencoder
+        // Step 1: Call local autoencoder
         let (encoded, mse_error) = state
-            .sagemaker
-            .invoke_autoencoder(features.clone())
-            .await
-            .context("Failed to invoke autoencoder")?;
+            .local_ae
+            .encode(features.clone())
+            .context("Failed to run local autoencoder inference")?;
 
         // Step 2: Check threshold
         let is_anomalous = mse_error >= state.threshold;
@@ -176,51 +180,54 @@ async fn trigger_simulation(
         let (predicted_label, confidence, action) = if is_anomalous {
             anomalous_count += 1;
 
-            // Step 3: Call XGBoost
+            // Step 3: Classify attack type via XGBoost (SageMaker)
+            // XGBoost only sees encoded features from the autoencoder.
+            // All samples at this point are anomalous — XGBoost identifies
+            // the specific attack class (no BENIGN class in the model).
             let classification = state
                 .sagemaker
                 .invoke_xgboost(encoded)
                 .await
                 .context("Failed to invoke XGBoost")?;
 
-            // Step 4: Check if malicious
-            let is_malicious = classification.label != "BENIGN";
+            malicious_count += 1;
 
-            if is_malicious {
-                malicious_count += 1;
+            // Step 4: Trigger Lambda on first malicious detection
+            if !lambda_triggered {
+                log::warn!(
+                    "ATTACK DETECTED: {} (confidence: {:.2}%, MSE: {:.6}) — TRIGGERING LAMBDA",
+                    classification.label,
+                    classification.confidence * 100.0,
+                    mse_error
+                );
 
-                // Step 5: Trigger Lambda
-                if !lambda_triggered {
-                    log::warn!("MALICIOUS TRAFFIC DETECTED - TRIGGERING LAMBDA");
+                let attack_info = AttackInfo {
+                    attack_type: classification.label.clone(),
+                    confidence: classification.confidence,
+                    mse_error,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
 
-                    let attack_info = AttackInfo {
-                        attack_type: classification.label.clone(),
-                        confidence: classification.confidence,
-                        mse_error,
-                        timestamp: chrono::Utc::now().to_rfc3339(),
-                    };
+                state
+                    .lambda
+                    .trigger_shutdown(attack_info)
+                    .await
+                    .context("Failed to trigger Lambda")?;
 
-                    state
-                        .lambda
-                        .trigger_shutdown(attack_info)
-                        .await
-                        .context("Failed to trigger Lambda")?;
-
-                    lambda_triggered = true;
-                }
-
-                (
-                    Some(classification.label.clone()),
-                    Some(classification.confidence),
-                    format!("MALICIOUS - {}", classification.label),
-                )
+                lambda_triggered = true;
             } else {
-                (
-                    Some(classification.label.clone()),
-                    Some(classification.confidence),
-                    "ANOMALOUS but BENIGN".to_string(),
-                )
+                log::warn!(
+                    "ATTACK DETECTED: {} (confidence: {:.2}%) — Lambda already triggered",
+                    classification.label,
+                    classification.confidence * 100.0,
+                );
             }
+
+            (
+                Some(classification.label.clone()),
+                Some(classification.confidence),
+                format!("ATTACK: {}", classification.label),
+            )
         } else {
             benign_count += 1;
             (None, None, "BENIGN - Passed".to_string())
@@ -328,8 +335,12 @@ async fn main() -> Result<()> {
     log::info!("Detection threshold: {:.6}", args.threshold);
     log::info!("{}", "=".repeat(80));
 
+    // Initialize local autoencoder
+    log::info!("Initializing local autoencoder...");
+    let local_ae = Autoencoder::new(&args.autoencoder_model)?;
+
     // Initialize SageMaker runtime
-    log::info!("Initializing SageMaker runtime...");
+    log::info!("Initializing SageMaker runtime (XGBoost only)...");
     let sagemaker = SageMakerRuntime::new(
         args.autoencoder_endpoint.clone(),
         args.xgboost_endpoint.clone(),
@@ -342,6 +353,7 @@ async fn main() -> Result<()> {
 
     // Create app state
     let state = AppState {
+        local_ae: Arc::new(local_ae),
         sagemaker: Arc::new(sagemaker),
         lambda: Arc::new(lambda),
         production_data_dir: args.production_data_dir,
