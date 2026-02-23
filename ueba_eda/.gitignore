@@ -1,0 +1,9 @@
+data/**/*
+!data/r6.2/
+!data/r6.2/gold/
+!data/r6.2/gold/features/
+!data/r6.2/gold/features/*.parquet
+.venv/
+.vscode/
+__pycache__/
+.*_cache

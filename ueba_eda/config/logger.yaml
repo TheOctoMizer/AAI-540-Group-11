@@ -1,0 +1,13 @@
+# ============================================================
+# LOGGER CONFIG
+# Application-wide logging settings
+# ============================================================
+logger:
+  # Logging level: DEBUG | INFO | WARNING | ERROR
+  level: INFO
+
+  # Log message format
+  format: "[%(asctime)s %(filename)s->%(funcName)s():%(lineno)s]%(levelname)s: %(message)s"
+
+  # Timestamp format in logs
+  timestamp_format: "%Y-%m-%d %H:%M:%S"

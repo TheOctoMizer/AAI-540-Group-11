@@ -1,0 +1,72 @@
+# ============================================================
+# PATH CONFIG
+# Input and output locations for the pipeline
+# ============================================================
+paths:
+  # Raw input CSV file
+  raw_data_dir: ./data/r6.2/raw/
+
+  # raw data in parquet format (after ingestion)
+  bronze_data_dir: ./data/r6.2/bronze/
+  # Processed features (after feature engineering)
+  silver_data_dir: ./data/r6.2/silver/
+  # Final datasets for modeling (after aggregation)
+  gold_data_dir: ./data/r6.2/gold/
+
+# ============================================================
+# RUNTIME CONFIG
+# Controls how data is read and processed
+# ============================================================
+runtime:
+  # Number of rows processed per chunk (memory control)
+  chunk_size: 500000
+  # chunk_size: 10 # for testing
+
+# ============================================================
+# ENVIRONMENT CONFIG
+# Controls how data is read and processed
+# ============================================================
+environment:
+  # Whether to run in test mode (process only a small subset of data)
+  mode: prod # options: test | prod
+  max_rows: null # If null, process all rows. Only used in test mode.
+# ============================================================
+# PIPELINE CONFIG
+# Contorls which [pipelines to run]
+# ============================================================
+pipeline:
+  # Whether to run the ingestion pipeline
+  run_ingestion: true
+  
+  # Whether to run the preprocessing pipeline
+  run_preprocessing: true
+
+  # Whether to run the feature engineering pipeline
+  run_feature_engineering: true
+
+# ============================================================
+# PARQUET CONFIG
+# Controls Parquet write behaviour
+# ============================================================
+parquet:
+  # Compression codec: zstd | snappy | gzip
+  compression: zstd
+
+  # Compression level (zstd: 1–22)
+  compression_level: 3
+
+  # Whether to write column-level statistics
+  statistics: true
+
+# ============================================================
+# GENERAL CONFIG
+# Other application-wide settings
+# ============================================================
+general:
+  timestamp_formats: 
+      - "%m/%d/%Y %H:%M:%S"
+      - "%m/%d/%Y %H:%M"
+    
+  overwrite_datasource: false
+  overwrite_preprocessing: false
+  overwrite_features : false
