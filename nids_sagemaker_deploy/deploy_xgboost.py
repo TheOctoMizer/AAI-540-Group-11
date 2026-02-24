@@ -89,9 +89,9 @@ def package_model(model_path: str, label_map_path: str, inference_script: str, o
 # S3 upload
 # ---------------------------------------------------------------------------
 
-def upload_to_s3(local_path: str, bucket: str, key_prefix: str) -> str:
+def upload_to_s3(local_path: str, bucket: str, key_prefix: str, region: str = None) -> str:
     """Upload a local file to S3 and return the s3:// URI."""
-    s3 = boto3.client("s3")
+    s3 = boto3.client("s3", region_name=region)
     filename = Path(local_path).name
     s3_key = f"{key_prefix}/{filename}"
 
@@ -257,7 +257,7 @@ def main():
     )
 
     # Step 2: Upload to S3
-    model_data = upload_to_s3(model_archive, args.bucket, "models/xgboost")
+    model_data = upload_to_s3(model_archive, args.bucket, "models/xgboost", region=region)
 
     # Step 3: Deploy
     endpoint_name = deploy_to_sagemaker(

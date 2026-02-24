@@ -62,19 +62,23 @@ def _fetch_cw_stat(cw, endpoint_name: str, variant: str, metric: str, stat: str,
     start = now - timedelta(minutes=lookback_min)
     try:
         is_percentile = stat.startswith("p")
-        resp = cw.get_metric_statistics(
-            Namespace="AWS/SageMaker",
-            MetricName=metric,
-            Dimensions=[
+        kwargs = {
+            "Namespace": "AWS/SageMaker",
+            "MetricName": metric,
+            "Dimensions": [
                 {"Name": "EndpointName", "Value": endpoint_name},
                 {"Name": "VariantName",  "Value": variant},
             ],
-            StartTime=start,
-            EndTime=now,
-            Period=lookback_min * 60,
-            Statistics=[] if is_percentile else [stat],
-            ExtendedStatistics=[stat] if is_percentile else [],
-        )
+            "StartTime": start,
+            "EndTime": now,
+            "Period": lookback_min * 60,
+        }
+        if is_percentile:
+            kwargs["ExtendedStatistics"] = [stat]
+        else:
+            kwargs["Statistics"] = [stat]
+
+        resp = cw.get_metric_statistics(**kwargs)
         dps = resp.get("Datapoints", [])
         if dps:
             latest = sorted(dps, key=lambda d: d["Timestamp"])[-1]
@@ -93,7 +97,7 @@ def fetch_endpoint_data(cfg: dict, region: str) -> dict:
     lookback = cfg["monitor"]["cloudwatch_lookback_minutes"]
     data     = {}
 
-    for key in ("autoencoder", "xgboost"):
+    for key in cfg["endpoints"].keys():
         ep_name = cfg["endpoints"][key]["name"]
         variant = cfg["endpoints"][key]["variant"]
 
@@ -123,8 +127,9 @@ def fetch_endpoint_data(cfg: dict, region: str) -> dict:
 
 def mock_endpoint_data(cfg: dict) -> dict:
     """Return plausible mock data for dry-run mode."""
-    return {
-        "autoencoder": {
+    data = {}
+    if "autoencoder" in cfg["endpoints"]:
+        data["autoencoder"] = {
             "endpoint":    cfg["endpoints"]["autoencoder"]["name"],
             "status":      "InService",
             "invocations": 142,
@@ -132,8 +137,9 @@ def mock_endpoint_data(cfg: dict) -> dict:
             "lat_p99_ms":  87.2,
             "err4xx":      0,
             "err5xx":      0,
-        },
-        "xgboost": {
+        }
+    if "xgboost" in cfg["endpoints"]:
+        data["xgboost"] = {
             "endpoint":    cfg["endpoints"]["xgboost"]["name"],
             "status":      "InService",
             "invocations": 142,
@@ -141,8 +147,8 @@ def mock_endpoint_data(cfg: dict) -> dict:
             "lat_p99_ms":  22.9,
             "err4xx":      0,
             "err5xx":      0,
-        },
-    }
+        }
+    return data
 
 
 def load_drift_report(cfg: dict) -> dict | None:
@@ -184,7 +190,8 @@ def render_dashboard(cfg: dict, ep_data: dict, drift: dict | None, region: str, 
     print("║" + ts_line.ljust(W) + "║")
     print("╠" + "═" * W + "╣")
 
-    for key in ("autoencoder", "xgboost"):
+    ep_keys = list(ep_data.keys())
+    for i, key in enumerate(ep_keys):
         d    = ep_data[key]
         icon = STATUS_ICON.get(d["status"], "⚪")
         name = d["endpoint"]
@@ -213,7 +220,7 @@ def render_dashboard(cfg: dict, ep_data: dict, drift: dict | None, region: str, 
         err_icon = "🔴" if e5 > 0 else "🟢"
         print("║" + f"      Errors 4xx/5xx: {int(e4)}/{int(e5)}  {err_icon}".ljust(W) + "║")
 
-        if key == "autoencoder":
+        if i < len(ep_keys) - 1:
             print("╠" + "─" * W + "╣")
 
     print("╠" + "═" * W + "╣")

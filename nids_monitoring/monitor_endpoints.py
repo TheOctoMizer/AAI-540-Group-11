@@ -63,19 +63,23 @@ def fetch_cloudwatch_metrics(
     results = {}
     for metric_name, stat, _ in ENDPOINT_METRICS:
         try:
-            resp = cw_client.get_metric_statistics(
-                Namespace="AWS/SageMaker",
-                MetricName=metric_name,
-                Dimensions=[
+            kwargs = {
+                "Namespace": "AWS/SageMaker",
+                "MetricName": metric_name,
+                "Dimensions": [
                     {"Name": "EndpointName",  "Value": endpoint_name},
                     {"Name": "VariantName",   "Value": variant_name},
                 ],
-                StartTime=start,
-                EndTime=now,
-                Period=lookback_minutes * 60,
-                Statistics=[stat] if stat in ("Sum", "Average", "Maximum") else [],
-                ExtendedStatistics=[stat] if stat.startswith("p") else [],
-            )
+                "StartTime": start,
+                "EndTime": now,
+                "Period": lookback_minutes * 60,
+            }
+            if stat.startswith("p"):
+                kwargs["ExtendedStatistics"] = [stat]
+            else:
+                kwargs["Statistics"] = [stat]
+
+            resp = cw_client.get_metric_statistics(**kwargs)
             dps = resp.get("Datapoints", [])
             if dps:
                 latest = sorted(dps, key=lambda d: d["Timestamp"])[-1]
@@ -144,7 +148,7 @@ def poll_once(cfg: dict, region: str, log_file, dry_run: bool) -> dict:
     lookback = cfg["monitor"]["cloudwatch_lookback_minutes"]
     snapshot = {"timestamp": ts, "endpoints": {}}
 
-    for key in ("autoencoder", "xgboost"):
+    for key in cfg["endpoints"].keys():
         ep_name  = cfg["endpoints"][key]["name"]
         variant  = cfg["endpoints"][key]["variant"]
         status   = describe_endpoint_status(sm, ep_name)
