@@ -1,10 +1,10 @@
 #!/bin/bash
 # ============================================================
-#  deploy_all.sh — Full NIDS Stack Deployment
+#  deploy_all.sh - Full NIDS Stack Deployment
 #  Steps:
-#    1. Deploy Go server     → t2.micro EC2  (subnet A)
-#    2. Deploy XGBoost       → SageMaker     (ml.m5.large)
-#    3. Deploy Rust NIDS     → t2.small EC2  (subnet B, private IP of Go server)
+#    1. Deploy Go server     - t4g.micro EC2 (subnet A, ARM64)
+#    2. Deploy XGBoost       - SageMaker     (ml.m5.large)
+#    3. Deploy Rust NIDS     - t2.small EC2  (subnet B, x86_64)
 #
 #  All EC2 instances use different subnets (multi-AZ).
 #  Rust NIDS communicates with Go server via PRIVATE IP.
@@ -12,7 +12,8 @@
 set -euo pipefail
 
 REGION="us-east-1"
-AMI="ami-0f3caa1cf4417e51b"        # Amazon Linux 2023 x86_64
+AMI_X86="ami-0f3caa1cf4417e51b"    # Amazon Linux 2023 x86_64
+AMI_ARM64="ami-0bea3ccc607167c10"  # Amazon Linux 2023 arm64 (for t4g)
 KEY_NAME="vockey"
 KEY_PATH="${HOME}/.ssh/labsuser.pem"
 ROLE_ARN="arn:aws:iam::539014262970:role/LabRole"
@@ -25,7 +26,7 @@ NIDS_DIR="$ROOT_DIR/ai_nids_rust"
 DEPLOY_DIR="$ROOT_DIR/nids_sagemaker_deploy"
 MODELS_DIR="$NIDS_DIR/models"
 
-# ── Helpers ─────────────────────────────────────────────────
+# ------ Helpers ---------------------------------------------------------------------------------------------------------------------------------------------------
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -42,8 +43,11 @@ wait_for_ssh() {
   die "SSH timed out for $ip"
 }
 
-# ── Discover all subnets ────────────────────────────────────
-mapfile -t SUBNETS < <(aws ec2 describe-subnets --region "$REGION" \
+# ------ Discover all subnets ------------------------------------------------------------------------------------------------------------
+SUBNETS=()
+while IFS= read -r _subnet; do
+  [[ -n "$_subnet" ]] && SUBNETS+=("$_subnet")
+done < <(aws ec2 describe-subnets --region "$REGION" \
   --query 'Subnets[*].SubnetId' --output text | tr '\t' '\n')
 log "Found ${#SUBNETS[@]} subnets: ${SUBNETS[*]}"
 [ "${#SUBNETS[@]}" -ge 2 ] || die "Need at least 2 subnets"
@@ -51,7 +55,8 @@ log "Found ${#SUBNETS[@]} subnets: ${SUBNETS[*]}"
 SUBNET_GO="${SUBNETS[0]}"    # Go server subnet
 SUBNET_NIDS="${SUBNETS[1]}"  # Rust NIDS subnet
 
-# ── Security Group ──────────────────────────────────────────
+# ------ Security Group ------------------------------------------------------------------------------------------------------------------------------
+log "Checking for security group 'go-server-sg'..."
 VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true \
   --query 'Vpcs[0].VpcId' --output text --region "$REGION")
 
@@ -60,35 +65,40 @@ SG_ID=$(aws ec2 describe-security-groups \
   --query 'SecurityGroups[0].GroupId' --output text --region "$REGION" 2>/dev/null || true)
 
 if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
+  log "  Creating new security group 'go-server-sg'..."
   SG_ID=$(aws ec2 create-security-group \
     --group-name "go-server-sg" \
-    --description "NIDS stack — SSH, 8080, 3000" \
+    --description "NIDS stack - SSH, 8080, 3000" \
     --vpc-id "$VPC_ID" --query 'GroupId' --output text --region "$REGION")
-  aws ec2 authorize-security-group-ingress \
-    --group-id "$SG_ID" --protocol tcp --port 22   --cidr 0.0.0.0/0 --region "$REGION" > /dev/null
-  aws ec2 authorize-security-group-ingress \
-    --group-id "$SG_ID" --protocol tcp --port 8080 --cidr 0.0.0.0/0 --region "$REGION" > /dev/null
-  aws ec2 authorize-security-group-ingress \
-    --group-id "$SG_ID" --protocol tcp --port 3000 --cidr 0.0.0.0/0 --region "$REGION" > /dev/null
+  
+  log "  Authorizing ingress: 22, 8080, 3000 from 0.0.0.0/0..."
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22   --cidr 0.0.0.0/0 --region "$REGION" > /dev/null
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8080 --cidr 0.0.0.0/0 --region "$REGION" > /dev/null
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 3000 --cidr 0.0.0.0/0 --region "$REGION" > /dev/null
 fi
 log "Security group: $SG_ID"
 
+# Ensure SSH key has correct permissions
+if [ -f "$KEY_PATH" ]; then
+  chmod 400 "$KEY_PATH"
+fi
+
 # ============================================================
-#  STEP 1 — Go Server (t2.micro)
+#  STEP 1 --- Go Server (t4g.micro)
 # ============================================================
 log ""
-log "════════════════════════════════════════════"
-log "  STEP 1: Go Server (t2.micro, $SUBNET_GO)"
-log "════════════════════════════════════════════"
+log "------------------------------------------------------------------------------------------------------------------------------------"
+log "  STEP 1: Go Server (t4g.micro, $SUBNET_GO)"
+log "------------------------------------------------------------------------------------------------------------------------------------"
 
-log "Building Go binary for Linux..."
+log "Building Go binary for Linux ARM64..."
 cd "$GO_DIR"
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o go-server-linux main.go
+GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o go-server-linux main.go
 log "  Built: $(du -sh go-server-linux | cut -f1)"
 cd "$ROOT_DIR"
 
 GO_INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id "$AMI" --instance-type t2.micro \
+  --image-id "$AMI_ARM64" --instance-type t4g.micro \
   --key-name "$KEY_NAME" --security-group-ids "$SG_ID" \
   --subnet-id "$SUBNET_GO" \
   --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=nids-go-server}]" \
@@ -129,15 +139,15 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now go-server
 echo "Go server status: $(sudo systemctl is-active go-server)"
 REMOTE
-log "  ✓ Go server running at http://$GO_PRIVATE_IP:8080"
+log "  --- Go server running at http://$GO_PRIVATE_IP:8080"
 
 # ============================================================
-#  STEP 2 — XGBoost SageMaker Endpoint (ml.m5.large)
+#  STEP 2 --- XGBoost SageMaker Endpoint (ml.m5.large)
 # ============================================================
 log ""
-log "════════════════════════════════════════════"
+log "------------------------------------------------------------------------------------------------------------------------------------"
 log "  STEP 2: XGBoost SageMaker Endpoint"
-log "════════════════════════════════════════════"
+log "------------------------------------------------------------------------------------------------------------------------------------"
 
 # Pass all subnet IDs for multi-AZ SageMaker VPC config (optional but covers every subnet)
 ALL_SUBNETS_CSV=$(IFS=,; echo "${SUBNETS[*]}")
@@ -151,15 +161,15 @@ python deploy_xgboost.py \
   --bucket "$BUCKET" \
   --skip-test
 cd "$ROOT_DIR"
-log "  ✓ XGBoost endpoint: $XGBOOST_ENDPOINT"
+log "  --- XGBoost endpoint: $XGBOOST_ENDPOINT"
 
 # ============================================================
-#  STEP 3 — Rust NIDS (t2.small, private IP of Go server)
+#  STEP 3 --- Rust NIDS (t2.small, private IP of Go server)
 # ============================================================
 log ""
-log "════════════════════════════════════════════"
+log "------------------------------------------------------------------------------------------------------------------------------------"
 log "  STEP 3: Rust NIDS (t2.small, $SUBNET_NIDS)"
-log "════════════════════════════════════════════"
+log "------------------------------------------------------------------------------------------------------------------------------------"
 log "  Go server URL (private): http://$GO_PRIVATE_IP:8080"
 
 # User-data: install Rust toolchain and build tools only
@@ -181,7 +191,7 @@ USERDATA
 )
 
 NIDS_INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id "$AMI" --instance-type t2.small \
+  --image-id "$AMI_X86" --instance-type t2.small \
   --key-name "$KEY_NAME" --security-group-ids "$SG_ID" \
   --subnet-id "$SUBNET_NIDS" \
   --iam-instance-profile "Name=LabInstanceProfile" \
@@ -250,17 +260,17 @@ EOF
 ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ec2-user@"$NIDS_PUBLIC_IP" \
   'sudo systemctl daemon-reload && sudo systemctl enable nids'
 
-log "  ✓ Rust NIDS deployed (service enabled, start via: sudo systemctl start nids)"
+log "  --- Rust NIDS deployed (service enabled, start via: sudo systemctl start nids)"
 
 # ============================================================
 #  SUMMARY
 # ============================================================
 log ""
-log "════════════════════════════════════════════════════════"
+log "------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 log "  DEPLOYMENT COMPLETE"
-log "════════════════════════════════════════════════════════"
+log "------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 log "  Go Server"
-log "    Instance : $GO_INSTANCE_ID (t2.micro)"
+log "    Instance : $GO_INSTANCE_ID (t4g.micro)"
 log "    Subnet   : $SUBNET_GO"
 log "    Private  : http://$GO_PRIVATE_IP:8080"
 log "    Test     : curl http://$GO_PUBLIC_IP:8080/health"
@@ -277,14 +287,14 @@ log "    SSH      : ssh -i $KEY_PATH ec2-user@$NIDS_PUBLIC_IP"
 log "    Start    : sudo systemctl start nids"
 log "    Logs     : sudo journalctl -u nids -f"
 log "    Trigger  : curl -X POST http://$NIDS_PUBLIC_IP:3000/trigger"
-log "════════════════════════════════════════════════════════"
+log "------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 
 # Save deployment info
 cat > "$ROOT_DIR/deployment_info.json" << DEPINFO
 {
   "go_server": {
     "instance_id": "$GO_INSTANCE_ID",
-    "instance_type": "t2.micro",
+    "instance_type": "t4g.micro",
     "subnet": "$SUBNET_GO",
     "private_ip": "$GO_PRIVATE_IP",
     "public_ip": "$GO_PUBLIC_IP",
