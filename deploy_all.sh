@@ -2,6 +2,7 @@
 # ============================================================
 #  deploy_all.sh - Full NIDS Stack Deployment
 #  Steps:
+#    0. Deploy Lambda      - nids-vm-shutdown (shutdown action)
 #    1. Deploy Go server     - t4g.micro EC2 (subnet A, ARM64)
 #    2. Deploy XGBoost       - SageMaker     (ml.m5.large)
 #    3. Deploy Rust NIDS     - t2.small EC2  (subnet B, x86_64)
@@ -11,6 +12,12 @@
 # ============================================================
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GO_DIR="$ROOT_DIR/go_server"
+NIDS_DIR="$ROOT_DIR/ai_nids_rust"
+DEPLOY_DIR="$ROOT_DIR/nids_sagemaker_deploy"
+MODELS_DIR="$NIDS_DIR/models"
+
 REGION="us-east-1"
 AMI_X86="ami-0f3caa1cf4417e51b"    # Amazon Linux 2023 x86_64
 AMI_ARM64="ami-0bea3ccc607167c10"  # Amazon Linux 2023 arm64 (for t4g)
@@ -19,12 +26,8 @@ KEY_PATH="${HOME}/.ssh/labsuser.pem"
 ROLE_ARN="arn:aws:iam::539014262970:role/LabRole"
 BUCKET="nids-mlops-models"
 XGBOOST_ENDPOINT="nids-xgboost"
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GO_DIR="$ROOT_DIR/go_server"
-NIDS_DIR="$ROOT_DIR/ai_nids_rust"
-DEPLOY_DIR="$ROOT_DIR/nids_sagemaker_deploy"
-MODELS_DIR="$NIDS_DIR/models"
+LAMBDA_FUNCTION="nids-vm-shutdown"
+LAMBDA_DIR="$ROOT_DIR/nids_lambda_actions"
 
 # ------ Helpers ---------------------------------------------------------------------------------------------------------------------------------------------------
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -82,6 +85,23 @@ log "Security group: $SG_ID"
 if [ -f "$KEY_PATH" ]; then
   chmod 400 "$KEY_PATH"
 fi
+
+# ============================================================
+#  STEP 0 --- Lambda Shutdown Action
+# ============================================================
+log ""
+log "------------------------------------------------------------------------------------------------------------------------------------"
+log "  STEP 0: Lambda Shutdown Action (nids-vm-shutdown)"
+log "------------------------------------------------------------------------------------------------------------------------------------"
+
+log "Deploying / updating Lambda function '$LAMBDA_FUNCTION'..."
+LAMBDA_ROLE_ARN="$ROLE_ARN" \
+AWS_REGION="$REGION" \
+INSTANCE_TAG_KEY="Name" \
+INSTANCE_TAG_VAL="nids-go-server" \
+DRY_RUN="false" \
+  bash "$LAMBDA_DIR/deploy.sh"
+log "  --- Lambda '$LAMBDA_FUNCTION' deployed"
 
 # ============================================================
 #  STEP 1 --- Go Server (t4g.micro)
@@ -269,6 +289,10 @@ log ""
 log "------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 log "  DEPLOYMENT COMPLETE"
 log "------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
+log "  Lambda Shutdown"
+log "    Function : $LAMBDA_FUNCTION"
+log "    Trigger  : automatic (invoked by Rust NIDS on malicious detection)"
+log ""
 log "  Go Server"
 log "    Instance : $GO_INSTANCE_ID (t4g.micro)"
 log "    Subnet   : $SUBNET_GO"
@@ -292,6 +316,10 @@ log "---------------------------------------------------------------------------
 # Save deployment info
 cat > "$ROOT_DIR/deployment_info.json" << DEPINFO
 {
+  "lambda": {
+    "function_name": "$LAMBDA_FUNCTION",
+    "region": "$REGION"
+  },
   "go_server": {
     "instance_id": "$GO_INSTANCE_ID",
     "instance_type": "t4g.micro",
