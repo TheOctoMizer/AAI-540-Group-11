@@ -1,0 +1,125 @@
+name: NIDS CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Re-run only when training code or models change
+      - "nids_train/**"
+      - "nids_sagemaker_deploy/**"
+      - "nids_cicd/**"
+      - "ai_nids_rust/models/**"
+  workflow_dispatch:
+    inputs:
+      skip_train:
+        description: "Skip retraining (use existing artifacts)"
+        required: false
+        default: "false"
+        type: boolean
+      skip_deploy:
+        description: "Skip deployment (evaluate + report only)"
+        required: false
+        default: "false"
+        type: boolean
+      dry_run:
+        description: "Dry-run mode (no AWS calls)"
+        required: false
+        default: "false"
+        type: boolean
+
+# Prevent concurrent pipeline runs interfering with each other
+concurrency:
+  group: nids-cicd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  pipeline:
+    name: NIDS Retrain → Evaluate → Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Python setup ──────────────────────────────────────────────────
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install training dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r nids_train/requirements.txt 2>/dev/null || true
+          pip install -r nids_cicd/requirements.txt
+
+      # ── AWS credentials ───────────────────────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      # ── Build flags ───────────────────────────────────────────────────
+      - name: Resolve pipeline flags
+        id: flags
+        run: |
+          SKIP_TRAIN=""
+          SKIP_DEPLOY=""
+          DRY_RUN=""
+          if [[ "${{ github.event.inputs.skip_train }}"  == "true" ]]; then SKIP_TRAIN="--skip-train";  fi
+          if [[ "${{ github.event.inputs.skip_deploy }}" == "true" ]]; then SKIP_DEPLOY="--skip-deploy"; fi
+          if [[ "${{ github.event.inputs.dry_run }}"     == "true" ]]; then DRY_RUN="--dry-run";        fi
+          echo "skip_train=$SKIP_TRAIN"   >> "$GITHUB_OUTPUT"
+          echo "skip_deploy=$SKIP_DEPLOY" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$DRY_RUN"         >> "$GITHUB_OUTPUT"
+
+      # ── Run pipeline ──────────────────────────────────────────────────
+      - name: Run NIDS CI/CD pipeline
+        working-directory: nids_cicd
+        env:
+          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+          S3_BUCKET:          ${{ secrets.S3_BUCKET }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+        run: |
+          python pipeline.py \
+            --role   "$SAGEMAKER_ROLE_ARN" \
+            --bucket "$S3_BUCKET" \
+            --region "${AWS_DEFAULT_REGION}" \
+            ${{ steps.flags.outputs.skip_train }} \
+            ${{ steps.flags.outputs.skip_deploy }} \
+            ${{ steps.flags.outputs.dry_run }}
+
+      # ── Upload report ─────────────────────────────────────────────────
+      - name: Upload CI/CD report
+        if: always()   # upload even on failure so we can inspect gate results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cicd-report-${{ github.run_number }}
+          path: nids_cicd/cicd_report.json
+          retention-days: 30
+
+      # ── Notify on failure ─────────────────────────────────────────────
+      - name: Summarise pipeline result
+        if: always()
+        run: |
+          if [ -f nids_cicd/cicd_report.json ]; then
+            PASSED=$(python3 -c "import json; d=json.load(open('nids_cicd/cicd_report.json')); print(d['overall_passed'])")
+            echo "## NIDS Pipeline Result: $PASSED" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            python3 -c "
+          import json
+          d = json.load(open('nids_cicd/cicd_report.json'))
+          for s in d['steps']:
+              icon = '✅' if s['passed'] else ('⏭' if s['skipped'] else '❌')
+              print(f\"{icon}  {s['name']:<30s}  {s.get('elapsed', 0):.1f}s  {s.get('message', '')}\")" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
