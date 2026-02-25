@@ -147,7 +147,14 @@ done
 # ── Validate ─────────────────────────────────────────────────
 [ -n "$HOST" ] || die "No host specified. Use --host <IP> or export NIDS_HOST=<IP>"
 
-BASE_URL="http://${HOST}:${PORT}"
+if [[ "$HOST" == http://* ]] || [[ "$HOST" == https://* ]]; then
+  BASE_URL="${HOST}"
+  # If host contains protocol, port might already be included or not. 
+  # If it's just http://ip, we might still want to append the port if it's missing.
+  # But for simplicity, if protocol is provided, we assume the user knows what they are doing.
+else
+  BASE_URL="http://${HOST}:${PORT}"
+fi
 
 # ── Execute ──────────────────────────────────────────────────
 banner
