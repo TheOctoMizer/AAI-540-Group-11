@@ -70,25 +70,17 @@ def main():
     model_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not dataset_path.exists():
-        raise FileNotFoundError(f"Dataset not found: {dataset_path}")
-
     # -----------------------------
-    # Load and preprocess data
+    # Load and preprocess data (Global Benign)
     # -----------------------------
-    print("Loading and preprocessing data...")
+    print("Aggregating benign samples from all dataset files...")
     preprocessor = NIDSPreprocessor()
-    X, labels = preprocessor.preprocess_data(
-        dataset_path,
+    X_benign = preprocessor.aggregate_benign_data(
+        args.data_dir,
         fit_scaler=True,
     )
-
-    # Filter benign samples only
-    benign_mask = labels == "BENIGN"
-    X_benign = X[benign_mask]
-
-    print(f"Total samples: {len(X)}")
-    print(f"Benign samples: {len(X_benign)}")
+    
+    print(f"Total global benign samples: {len(X_benign)}")
 
     # -----------------------------
     # Split data (40/10/10/40)

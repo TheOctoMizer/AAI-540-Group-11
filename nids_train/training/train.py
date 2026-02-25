@@ -29,7 +29,8 @@ def train_autoencoder(model, X_train, X_val, config, device):
         for (x,) in train_loader:
             x = x.to(device)
             optimizer.zero_grad()
-            loss = criterion(model(x), x)
+            recon, _ = model(x)
+            loss = criterion(recon, x)
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -43,7 +44,7 @@ def train_autoencoder(model, X_train, X_val, config, device):
         with torch.no_grad():
             for (x,) in val_loader:
                 x = x.to(device)
-                recon = model(x)
+                recon, _ = model(x)
                 mse = ((x - recon) ** 2).mean(dim=1)
                 val_errors.extend(mse.cpu().numpy())
                 val_loss_sum += mse.mean().item()

@@ -8,6 +8,7 @@ import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
+from sklearn.utils.class_weight import compute_sample_weight
 
 from preprocessing.nids_preprocessor import NIDSPreprocessor
 from export.export_xgb_onnx import export_xgb_to_onnx
@@ -89,22 +90,18 @@ def train_xgboost_classifier(
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    # -----------------------------
-    # Load & preprocess
+    # Load & preprocess (Global Attacks)
     # -----------------------------
     preprocessor = NIDSPreprocessor("scaler_params.json")
-    X, labels = preprocessor.preprocess_data(
-        Path(data_dir) / dataset,
-        fit_scaler=False
-    )
+    
+    print(f"Aggregating all attack samples from {data_dir} ...")
+    X_attack, y_attack = preprocessor.aggregate_attack_data(data_dir)
 
-    # Remove benign
-    mask = labels != "BENIGN"
-    X_attack = X[mask]
-    y_attack = labels[mask]
-
-    print(f"Attack samples: {len(X_attack)}")
-    print("Attack classes:", np.unique(y_attack))
+    print(f"Total attack samples: {len(X_attack)}")
+    unique_classes, counts = np.unique(y_attack, return_counts=True)
+    print("Attack classes distribution:")
+    for cls, count in zip(unique_classes, counts):
+        print(f"  {cls}: {count}")
 
     # -----------------------------
     # Encode through autoencoder
@@ -140,19 +137,28 @@ def train_xgboost_classifier(
     # Train XGBoost
     # -----------------------------
     model = xgb.XGBClassifier(
-        n_estimators=200,
+        n_estimators=500,
         max_depth=6,
-        learning_rate=0.1,
+        learning_rate=0.05,
         subsample=0.8,
         colsample_bytree=0.8,
         objective="multi:softprob",
         eval_metric="mlogloss",
         tree_method="hist",
+        early_stopping_rounds=20,
         n_jobs=-1,
     )
 
     print("Training XGBoost classifier...")
-    model.fit(X_train, y_train)
+    # Compute balanced sample weights
+    sample_weights = compute_sample_weight(class_weight='balanced', y=y_train)
+    
+    model.fit(
+        X_train, y_train,
+        sample_weight=sample_weights,
+        eval_set=[(X_test, y_test)],
+        verbose=10
+    )
 
     # -----------------------------
     # Evaluate
