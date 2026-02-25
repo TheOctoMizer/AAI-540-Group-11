@@ -18,7 +18,8 @@ set -euo pipefail
 
 FUNCTION_NAME="nids-vm-shutdown"
 REGION="${AWS_REGION:-us-east-1}"
-ROLE_ARN="${LAMBDA_ROLE_ARN:-arn:aws:iam::539014262970:role/LabRole}"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ROLE_ARN="${LAMBDA_ROLE_ARN:-arn:aws:iam::${ACCOUNT_ID}:role/LabRole}"
 
 # Tag values used to locate the Go server EC2 instance
 INSTANCE_TAG_KEY="${INSTANCE_TAG_KEY:-Name}"
