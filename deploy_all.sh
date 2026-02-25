@@ -184,34 +184,35 @@ cd "$ROOT_DIR"
 log "  --- XGBoost endpoint: $XGBOOST_ENDPOINT"
 
 # ============================================================
-#  STEP 3 --- Rust NIDS (t2.small, private IP of Go server)
+#  STEP 3 --- Rust NIDS (t4g.small, ARM64, pre-built binary)
 # ============================================================
 log ""
 log "------------------------------------------------------------------------------------------------------------------------------------"
-log "  STEP 3: Rust NIDS (t2.small, $SUBNET_NIDS)"
+log "  STEP 3: Rust NIDS (t4g.small ARM64, $SUBNET_NIDS)"
 log "------------------------------------------------------------------------------------------------------------------------------------"
 log "  Go server URL (private): http://$GO_PRIVATE_IP:8080"
 
-# User-data: install Rust toolchain and build tools only
+# ---- 3a. Cross-compile Rust binary locally (Mac M-series → Linux ARM64) --
+log "Cross-compiling Rust NIDS for aarch64-unknown-linux-gnu..."
+cd "$NIDS_DIR"
+cargo zigbuild --release --target aarch64-unknown-linux-gnu 2>&1 | tail -5
+NIDS_BINARY="$NIDS_DIR/target/aarch64-unknown-linux-gnu/release/ai_nids_rust"
+[ -f "$NIDS_BINARY" ] || die "Rust binary not found: $NIDS_BINARY"
+log "  Built: $(du -sh "$NIDS_BINARY" | cut -f1)  at $NIDS_BINARY"
+cd "$ROOT_DIR"
+
+# ---- 3b. Launch ARM EC2 (no Rust toolchain needed in user-data) ----------
 NIDS_USER_DATA=$(cat <<'USERDATA'
 #!/bin/bash
-set -ex
-export HOME=/root
-
-# System deps
-dnf install -y gcc openssl-devel pkg-config
-
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
-source /root/.cargo/env
-
-echo "Rust installed: $(rustc --version)"
-echo "READY" > /tmp/rust-ready
+set -e
+# Only system deps needed to run the binary
+dnf install -y openssl ca-certificates
+echo "READY" > /tmp/nids-ready
 USERDATA
 )
 
 NIDS_INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id "$AMI_X86" --instance-type t2.small \
+  --image-id "$AMI_ARM64" --instance-type t4g.small \
   --key-name "$KEY_NAME" --security-group-ids "$SG_ID" \
   --subnet-id "$SUBNET_NIDS" \
   --iam-instance-profile "Name=LabInstanceProfile" \
@@ -230,27 +231,24 @@ log "  Private IP: $NIDS_PRIVATE_IP  |  Public IP: $NIDS_PUBLIC_IP"
 
 wait_for_ssh "$NIDS_PUBLIC_IP"
 
-log "Waiting for Rust install to complete on instance..."
-for i in $(seq 1 30); do
+log "Waiting for instance init to complete..."
+for i in $(seq 1 20); do
   STATUS=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ec2-user@"$NIDS_PUBLIC_IP" \
-    'cat /tmp/rust-ready 2>/dev/null || echo "waiting"' 2>/dev/null || echo "waiting")
+    'cat /tmp/nids-ready 2>/dev/null || echo "waiting"' 2>/dev/null || echo "waiting")
   [ "$STATUS" = "READY" ] && break
-  echo "  Rust install in progress... ($i/30)"; sleep 10
+  echo "  Instance init in progress... ($i/20)"; sleep 6
 done
 
-log "Syncing Rust source code and models..."
+# ---- 3c. Copy pre-built binary + models to instance ----------------------
+log "Copying binary and models to instance..."
+scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
+    "$NIDS_BINARY" "ec2-user@${NIDS_PUBLIC_IP}:/tmp/ai_nids_rust"
 rsync -az -e "ssh -i $KEY_PATH -o StrictHostKeyChecking=no" \
-  --exclude target --exclude .git \
-  "$NIDS_DIR/" ec2-user@"$NIDS_PUBLIC_IP":/home/ec2-user/ai_nids_rust/
+    "$NIDS_DIR/models/" "ec2-user@${NIDS_PUBLIC_IP}:/home/ec2-user/models/"
 
-log "Building Rust NIDS (this takes 3-5 minutes)..."
-ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ec2-user@"$NIDS_PUBLIC_IP" 'bash -s' <<REMOTE
-export HOME=/root
-source /root/.cargo/env
-cd /home/ec2-user/ai_nids_rust
-cargo build --release 2>&1 | tail -5
-echo "Build exit: \$?"
-REMOTE
+ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ec2-user@"$NIDS_PUBLIC_IP" \
+    'sudo mv /tmp/ai_nids_rust /usr/local/bin/ai_nids_rust && sudo chmod +x /usr/local/bin/ai_nids_rust'
+log "  Binary deployed."
 
 log "Installing Rust NIDS as systemd service..."
 ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ec2-user@"$NIDS_PUBLIC_IP" \
@@ -262,13 +260,13 @@ After=network.target
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/home/ec2-user/ai_nids_rust
-ExecStart=/root/.cargo/bin/cargo run --release -- \\
-  --autoencoder-model ./models/autoencoder.onnx \\
+WorkingDirectory=/home/ec2-user
+ExecStart=/usr/local/bin/ai_nids_rust \\
+  --autoencoder-model /home/ec2-user/models/autoencoder_fp32.onnx \\
   --xgboost-endpoint $XGBOOST_ENDPOINT \\
+  --lambda-function $LAMBDA_FUNCTION \\
   --go-server-url http://$GO_PRIVATE_IP:8080 \\
-  --production-data-dir ./data
-Environment=HOME=/root
+  --production-data-dir /home/ec2-user/data
 Environment=AWS_DEFAULT_REGION=$REGION
 Restart=on-failure
 RestartSec=10
@@ -278,9 +276,9 @@ WantedBy=multi-user.target
 EOF
 
 ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ec2-user@"$NIDS_PUBLIC_IP" \
-  'sudo systemctl daemon-reload && sudo systemctl enable nids'
+  'sudo systemctl daemon-reload && sudo systemctl enable --now nids'
 
-log "  --- Rust NIDS deployed (service enabled, start via: sudo systemctl start nids)"
+log "  --- Rust NIDS started! Service: nids (port 3000)"
 
 # ============================================================
 #  SUMMARY
@@ -304,7 +302,7 @@ log "    Endpoint : $XGBOOST_ENDPOINT (ml.m5.large)"
 log "    Subnets  : $ALL_SUBNETS_CSV"
 log ""
 log "  Rust NIDS"
-log "    Instance : $NIDS_INSTANCE_ID (t2.small)"
+log "    Instance : $NIDS_INSTANCE_ID (t4g.small, ARM64)"
 log "    Subnet   : $SUBNET_NIDS"
 log "    Private  : $NIDS_PRIVATE_IP"
 log "    SSH      : ssh -i $KEY_PATH ec2-user@$NIDS_PUBLIC_IP"
@@ -335,7 +333,7 @@ cat > "$ROOT_DIR/deployment_info.json" << DEPINFO
   },
   "rust_nids": {
     "instance_id": "$NIDS_INSTANCE_ID",
-    "instance_type": "t2.small",
+    "instance_type": "t4g.small",
     "subnet": "$SUBNET_NIDS",
     "private_ip": "$NIDS_PRIVATE_IP",
     "public_ip": "$NIDS_PUBLIC_IP",
