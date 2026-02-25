@@ -46,7 +46,7 @@ struct Args {
     #[arg(long, default_value = "http://localhost:8080")]
     go_server_url: String,
 
-    #[arg(long, default_value = "0.0567")]
+    #[arg(long, default_value = "0.001")]
     threshold: f32,
 }
 

@@ -55,11 +55,16 @@ class DataPipeline:
             "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv",
         ]
         
-        # Columns to drop (metadata, not features)
+        # Columns to drop (metadata and redundant/zero-variance features)
         self.drop_cols = [
             "Flow ID", "Source IP", "Source Port", 
             "Destination IP", "Destination Port", 
-            "Protocol", "Timestamp"
+            "Protocol", "Timestamp",
+            "Avg Bwd Segment Size", "Avg Fwd Segment Size", "Subflow Bwd Packets", 
+            "Fwd Header Length.1", "SYN Flag Count", "Subflow Bwd Bytes", 
+            "ECE Flag Count", "Subflow Fwd Packets", "Subflow Fwd Bytes",
+            "Bwd Avg Bulk Rate", "Bwd Avg Packets/Bulk", "Bwd Avg Bytes/Bulk", 
+            "Fwd Avg Bulk Rate", "Fwd Avg Packets/Bulk", "Fwd Avg Bytes/Bulk"
         ]
         
         # Create output directories

@@ -267,7 +267,8 @@ ExecStart=/usr/local/bin/ai_nids_rust \\
   --xgboost-endpoint $XGBOOST_ENDPOINT \\
   --lambda-function $LAMBDA_FUNCTION \\
   --go-server-url http://$GO_PRIVATE_IP:8080 \\
-  --production-data-dir /home/ec2-user/data
+  --production-data-dir /home/ec2-user/data \\
+  --threshold 0.001
 Environment=AWS_DEFAULT_REGION=$REGION
 Restart=on-failure
 RestartSec=10
