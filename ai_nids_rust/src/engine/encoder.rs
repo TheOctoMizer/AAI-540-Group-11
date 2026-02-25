@@ -14,7 +14,7 @@ impl Autoencoder {
 
         log::info!("Loading autoencoder model from: {}", model_path);
 
-        let input_size = 77;
+        let input_size = 62;
 
         let model = tract_onnx::onnx()
             .model_for_path(model_path)
