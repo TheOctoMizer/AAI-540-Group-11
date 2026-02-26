@@ -240,12 +240,27 @@ for i in $(seq 1 20); do
   echo "  Instance init in progress... ($i/20)"; sleep 6
 done
 
-# ---- 3c. Copy pre-built binary + models to instance ----------------------
+# ---- 3c. Copy pre-built binary + data + models to instance ----------------------
+log "Syncing latest models from training (if any)..."
+if [ -d "$ROOT_DIR/nids_train/model" ]; then
+    cp "$ROOT_DIR"/nids_train/model/*.onnx "$MODELS_DIR/" 2>/dev/null || true
+    cp "$ROOT_DIR"/nids_train/model/*.json "$MODELS_DIR/" 2>/dev/null || true
+fi
+
 log "Copying binary and models to instance..."
 scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
     "$NIDS_BINARY" "ec2-user@${NIDS_PUBLIC_IP}:/tmp/ai_nids_rust"
 rsync -az -e "ssh -i $KEY_PATH -o StrictHostKeyChecking=no" \
-    "$NIDS_DIR/models/" "ec2-user@${NIDS_PUBLIC_IP}:/home/ec2-user/models/"
+    "$MODELS_DIR/" "ec2-user@${NIDS_PUBLIC_IP}:/home/ec2-user/models/"
+
+# Sync production dataset
+DATA_DIR="$ROOT_DIR/nids_train/output/features/production"
+if [ -d "$DATA_DIR" ]; then
+    log "Copying production data to instance..."
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ec2-user@"$NIDS_PUBLIC_IP" 'mkdir -p /home/ec2-user/data'
+    rsync -az -e "ssh -i $KEY_PATH -o StrictHostKeyChecking=no" \
+        "$DATA_DIR/" "ec2-user@${NIDS_PUBLIC_IP}:/home/ec2-user/data/"
+fi
 
 ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ec2-user@"$NIDS_PUBLIC_IP" \
     'sudo mv /tmp/ai_nids_rust /usr/local/bin/ai_nids_rust && sudo chmod +x /usr/local/bin/ai_nids_rust'

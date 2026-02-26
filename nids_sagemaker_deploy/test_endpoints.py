@@ -12,7 +12,7 @@ import numpy as np
 from pathlib import Path
 
 
-def test_autoencoder(endpoint_name: str, num_features: int = 77):
+def test_autoencoder(endpoint_name: str, num_features: int = 62):
     """Test autoencoder endpoint."""
     print(f"\n{'='*60}")
     print(f"Testing Autoencoder Endpoint: {endpoint_name}")
@@ -91,7 +91,7 @@ def test_end_to_end(autoencoder_endpoint: str, xgboost_endpoint: str):
     runtime = boto3.client('sagemaker-runtime')
     
     # Step 1: Generate test features
-    test_features = np.random.rand(77).tolist()
+    test_features = np.random.rand(62).tolist()
     print(f"Step 1: Generated {len(test_features)} test features")
     
     # Step 2: Call autoencoder

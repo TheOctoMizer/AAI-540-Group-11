@@ -286,7 +286,7 @@ def main():
 
     # Step 4: Smoke test
     if not args.skip_test:
-        test_features = [0.1] * 77  # 77-dim dummy features
+        test_features = [0.1] * 62  # 62-dim dummy features
         test_endpoint(endpoint_name, test_features)
 
     # Save deployment info

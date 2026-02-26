@@ -43,7 +43,7 @@ def _encode_features(X: np.ndarray, autoencoder_path: str, latent_dim: int = 8) 
     Encode raw features through the autoencoder's encoder.
 
     Args:
-        X: Raw features array of shape (N, 77)
+        X: Raw features array of shape (N, 62)
         autoencoder_path: Path to autoencoder.pt weights
         latent_dim: Size of the latent bottleneck (default 8)
 

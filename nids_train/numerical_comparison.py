@@ -127,7 +127,7 @@ def main():
     print("=" * 80)
     
     # Configuration
-    input_dim = 77
+    input_dim = 62
     model_dir = Path("model")
     scaler_path = Path("scaler_params.json")
     
